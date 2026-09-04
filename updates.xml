@@ -3,6 +3,6 @@
   <app appid="lbdoddiodjjbglpdolhoindidpmfmhjj">
     <updatecheck
       codebase="https://vanhier-accountants-adviseurs.github.io/vanhier-chrome-sso-extensie/vanhier-microsoft-login.crx"
-      version="1.0.0" />
+      version="1.1.1" />
   </app>
 </gupdate>

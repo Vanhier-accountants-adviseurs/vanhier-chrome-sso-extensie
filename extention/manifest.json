@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vanhier Microsoft Login",
   "description": "Automatiseert Microsoft SSO voor ondersteunde applicaties.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "update_url": "https://vanhier-accountants-adviseurs.github.io/vanhier-chrome-sso-extensie/updates.xml",
   "content_scripts": [
     {

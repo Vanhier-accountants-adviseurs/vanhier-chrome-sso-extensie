@@ -38,7 +38,7 @@ async function startChatGPTLogin(tabId) {
     url: "https://chatgpt.com/auth/logout"
   });
 
-  await sleep(1000);
+  await sleep(2000);
 
   await chrome.tabs.update(tabId, {
     url: "https://chatgpt.com/auth/login"

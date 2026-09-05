@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Vanhier Microsoft Login",
+  "description": "Automatiseert Microsoft SSO voor ondersteunde applicaties en ChatGPT.",
+  "version": "1.2.0",
+  "update_url": "https://vanhier-accountants-adviseurs.github.io/vanhier-chrome-sso-extensie/updates.xml",
+  "permissions": [
+    "identity",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://connect.visma.com/*",
+    "https://app.paytsoftware.com/*",
+    "https://chatgpt.com/*",
+    "https://auth.openai.com/*",
+    "https://vanhier-custom-sso-aughfmd8ebakazeq.westeurope-01.azurewebsites.net/*",
+    "https://vanhier-accountants-adviseurs.github.io/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Vanhier Microsoft Login"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://connect.visma.com/*",
+        "https://app.paytsoftware.com/*",
+        "https://chatgpt.com/*",
+        "https://auth.openai.com/*",
+        "https://vanhier-accountants-adviseurs.github.io/vanhier-chrome-sso-extensie/start-chatgpt/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

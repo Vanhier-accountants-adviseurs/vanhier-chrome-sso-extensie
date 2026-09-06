@@ -38,7 +38,7 @@ if (location.hostname === "connect.visma.com") {
 
 // Visma Connect - Nmbrs Payroll
 if (location.hostname === "connect.visma.com") {
-    if (location.href.includes("payroll.nmbrs.com")) {
+    if (location.href.includes("payroll.nmbrs.com") || location.href.includes("corebff.nmbrsapp.com")) {
         console.log("Visma: Nmbrs-login gedetecteerd");
 
         function startMicrosoftLogin() {

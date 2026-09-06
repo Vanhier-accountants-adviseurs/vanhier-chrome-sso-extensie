@@ -1,0 +1,198 @@
+name: Deploy Chrome Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "extension/**"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ==========================================
+      # Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # ==========================================
+      # Python
+      # ==========================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ==========================================
+      # Chrome installeren
+      # ==========================================
+      - name: Install Google Chrome
+        run: |
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get update
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+      # ==========================================
+      # PEM-key herstellen uit GitHub Secret
+      # ==========================================
+      - name: Restore extension PEM
+        env:
+          EXTENSION_PEM_BASE64: ${{ secrets.EXTENSION_PEM_BASE64 }}
+        run: |
+          echo "$EXTENSION_PEM_BASE64" | base64 --decode > extension-key.pem
+          chmod 600 extension-key.pem
+
+      # ==========================================
+      # Versie verhogen
+      # 1.3.0 -> 1.4.0
+      # ==========================================
+      - name: Increase extension version
+        run: |
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          manifest_path = Path("extension/manifest.json")
+          text = manifest_path.read_text()
+
+          match = re.search(
+              r'"version"\s*:\s*"(\d+)\.(\d+)\.(\d+)"',
+              text
+          )
+
+          if not match:
+              raise SystemExit(
+                  "Versie niet gevonden in extension/manifest.json"
+              )
+
+          major = int(match.group(1))
+          minor = int(match.group(2))
+          patch = int(match.group(3))
+
+          new_version = f"{major}.{minor + 1}.0"
+
+          text = re.sub(
+              r'("version"\s*:\s*")\d+\.\d+\.\d+(")',
+              rf'\g<1>{new_version}\g<2>',
+              text,
+              count=1
+          )
+
+          manifest_path.write_text(text)
+
+          print(f"Nieuwe versie: {new_version}")
+          PY
+
+      # ==========================================
+      # Versie uitlezen
+      # ==========================================
+      - name: Read extension version
+        id: version
+        run: |
+          VERSION=$(python3 -c '
+          import json
+          with open("extension/manifest.json") as f:
+              print(json.load(f)["version"])
+          ')
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Extension versie: $VERSION"
+
+      # ==========================================
+      # Chrome extensie inpakken
+      # ==========================================
+      - name: Pack Chrome extension
+        run: |
+          google-chrome \
+            --headless \
+            --no-sandbox \
+            --disable-gpu \
+            --pack-extension="$GITHUB_WORKSPACE/extension" \
+            --pack-extension-key="$GITHUB_WORKSPACE/extension-key.pem"
+
+      # ==========================================
+      # CRX vervangen
+      # ==========================================
+      - name: Replace CRX
+        run: |
+          cp extension.crx vanhier-microsoft-login.crx
+
+      # ==========================================
+      # updates.xml aanpassen
+      # ==========================================
+      - name: Update updates.xml
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+
+          path = Path("updates.xml")
+          text = path.read_text()
+
+          text = re.sub(
+              r'(version=")\d+\.\d+\.\d+(")',
+              rf'\g<1>{version}\g<2>',
+              text,
+              count=1
+          )
+
+          path.write_text(text)
+
+          print(f"updates.xml bijgewerkt naar {version}")
+          PY
+
+      # ==========================================
+      # PEM verwijderen
+      # ==========================================
+      - name: Remove PEM
+        if: always()
+        run: |
+          rm -f extension-key.pem
+
+      # ==========================================
+      # Wijzigingen committen
+      # ==========================================
+      - name: Commit generated files
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add extension/manifest.json
+          git add vanhier-microsoft-login.crx
+          git add updates.xml
+
+          if git diff --cached --quiet; then
+            echo "Geen wijzigingen."
+            exit 0
+          fi
+
+          git commit -m "Deploy extension v${VERSION} [skip ci]"
+          git push
+
+      # ==========================================
+      # GitHub Release + Tag
+      # ==========================================
+      - name: Create GitHub release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "Vanhier Microsoft Login v${VERSION}" \
+            --generate-notes

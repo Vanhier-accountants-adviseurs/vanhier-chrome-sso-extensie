@@ -16,15 +16,27 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message?.type !== "start-chatgpt-login") return;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "start-chatgpt-login") {
+    const tabId = sender.tab?.id;
+    if (!tabId) return;
 
-  const tabId = sender.tab?.id;
-  if (!tabId) return;
+    startChatGPTLogin(tabId).catch(error => {
+      console.error("ChatGPT Auto Login fout:", error);
+    });
+    return;
+  }
 
-  startChatGPTLogin(tabId).catch(error => {
-    console.error("ChatGPT Auto Login fout:", error);
-  });
+  if (message?.type === "get-mochadocs-email") {
+    getMochaDocsEmail()
+      .then(email => sendResponse({ email }))
+      .catch(error => {
+        console.error("MochaDocs e-mail ophalen fout:", error);
+        sendResponse({ email: null });
+      });
+
+    return true;
+  }
 });
 
 async function startChatGPTLogin(tabId) {
@@ -46,7 +58,7 @@ async function startChatGPTLogin(tabId) {
 }
 
 async function getLoginData() {
-  const token = await getAccessToken();
+  const token = await getAccessToken(CONFIG.apiScope);
 
   const response = await fetch(CONFIG.functionUrl, {
     method: "GET",
@@ -71,7 +83,7 @@ async function getLoginData() {
   return data;
 }
 
-async function getAccessToken() {
+async function getAccessToken(scope, interactive = true) {
   const redirectUri = chrome.identity.getRedirectURL("entra");
   const state = crypto.randomUUID();
   const verifier = randomString(64);
@@ -85,29 +97,44 @@ async function getAccessToken() {
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);
   authorizeUrl.searchParams.set("response_mode", "query");
-  authorizeUrl.searchParams.set("scope", `openid profile ${CONFIG.apiScope}`);
+  authorizeUrl.searchParams.set("scope", `openid profile ${scope}`);
   authorizeUrl.searchParams.set("state", state);
   authorizeUrl.searchParams.set("code_challenge", challenge);
   authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
-  const resultUrl = await chrome.identity.launchWebAuthFlow({
-    url: authorizeUrl.toString(),
-    interactive: true
-  });
+  let resultUrl;
+
+  try {
+    resultUrl = await chrome.identity.launchWebAuthFlow({
+      url: authorizeUrl.toString(),
+      interactive
+    });
+  } catch (error) {
+    if (!interactive) return null;
+    throw error;
+  }
+
+  if (!resultUrl) {
+    if (!interactive) return null;
+    throw new Error("Geen redirect ontvangen van login.microsoftonline.com");
+  }
 
   const result = new URL(resultUrl);
 
   if (result.searchParams.get("state") !== state) {
+    if (!interactive) return null;
     throw new Error("OAuth state mismatch");
   }
 
   const error = result.searchParams.get("error");
   if (error) {
+    if (!interactive) return null;
     throw new Error(result.searchParams.get("error_description") || error);
   }
 
   const code = result.searchParams.get("code");
   if (!code) {
+    if (!interactive) return null;
     throw new Error("Geen authorization code ontvangen");
   }
 
@@ -124,7 +151,7 @@ async function getAccessToken() {
         code,
         redirect_uri: redirectUri,
         code_verifier: verifier,
-        scope: CONFIG.apiScope
+        scope
       })
     }
   );
@@ -132,16 +159,68 @@ async function getAccessToken() {
   const tokenText = await tokenResponse.text();
 
   if (!tokenResponse.ok) {
+    if (!interactive) return null;
     throw new Error(`Token HTTP ${tokenResponse.status}: ${tokenText}`);
   }
 
   const tokenData = JSON.parse(tokenText);
 
   if (!tokenData.access_token) {
+    if (!interactive) return null;
     throw new Error("Geen access token ontvangen");
   }
 
   return tokenData.access_token;
+}
+
+const MOCHADOCS_EMAIL_CACHE_TTL = 60 * 60 * 1000;
+
+async function getMochaDocsEmail() {
+  const cached = await chrome.storage.session.get("mochadocsEmail");
+  const entry = cached.mochadocsEmail;
+
+  if (entry && Date.now() - entry.fetchedAt < MOCHADOCS_EMAIL_CACHE_TTL) {
+    return entry.email;
+  }
+
+  const email = await fetchGraphEmail();
+
+  await chrome.storage.session.set({
+    mochadocsEmail: { email, fetchedAt: Date.now() }
+  });
+
+  return email;
+}
+
+async function fetchGraphEmail() {
+  let token = await getAccessToken(CONFIG.graphScope, false);
+
+  if (!token) {
+    console.log("MochaDocs: geen stille Microsoft-sessie gevonden, interactief inloggen");
+    token = await getAccessToken(CONFIG.graphScope, true);
+  }
+
+  if (!token) {
+    return null;
+  }
+
+  const response = await fetch(
+    "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName",
+    {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json"
+      }
+    }
+  );
+
+  if (!response.ok) {
+    console.error(`Graph /me HTTP ${response.status}`);
+    return null;
+  }
+
+  const data = await response.json();
+  return data.mail || data.userPrincipalName || null;
 }
 
 function randomString(length) {

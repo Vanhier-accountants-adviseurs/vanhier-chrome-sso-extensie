@@ -14,6 +14,8 @@
     "https://app.paytsoftware.com/*",
     "https://chatgpt.com/*",
     "https://auth.openai.com/*",
+    "https://auth2.mochadocs.com/*",
+    "https://graph.microsoft.com/*",
     "https://vanhier-custom-sso-aughfmd8ebakazeq.westeurope-01.azurewebsites.net/*",
     "https://vanhier-accountants-adviseurs.github.io/*"
   ],
@@ -30,6 +32,7 @@
         "https://app.paytsoftware.com/*",
         "https://chatgpt.com/*",
         "https://auth.openai.com/*",
+        "https://auth2.mochadocs.com/*",
         "https://vanhier-accountants-adviseurs.github.io/vanhier-chrome-sso-extensie/start-chatgpt/*"
       ],
       "js": ["content.js"],

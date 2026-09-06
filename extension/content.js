@@ -99,6 +99,56 @@ if (location.hostname === "app.paytsoftware.com") {
     }
 }
 
+// MochaDocs
+if (location.hostname === "auth2.mochadocs.com") {
+    (async function initMochaDocsLogin() {
+        let email;
+
+        try {
+            const response = await chrome.runtime.sendMessage({ type: "get-mochadocs-email" });
+            email = response?.email;
+        } catch (error) {
+            console.error("MochaDocs: kon e-mailadres niet ophalen:", error);
+        }
+
+        if (!email) {
+            console.log("MochaDocs: geen ingelogde Microsoft-gebruiker gevonden, auto-login overgeslagen");
+            return;
+        }
+
+        function vulMochaDocsLoginIn() {
+            const input = document.getElementById("username");
+            const button = document.querySelector('button[name="login"][type="submit"]');
+
+            if (input && button) {
+                console.log("MochaDocs: login-formulier gevonden");
+
+                input.value = email;
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+
+                button.click();
+                return true;
+            }
+
+            return false;
+        }
+
+        if (!vulMochaDocsLoginIn()) {
+            const observer = new MutationObserver(() => {
+                if (vulMochaDocsLoginIn()) {
+                    observer.disconnect();
+                }
+            });
+
+            observer.observe(document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+        }
+    })();
+}
+
 // ================================
 // ChatGPT Auto Login trigger page
 // ================================

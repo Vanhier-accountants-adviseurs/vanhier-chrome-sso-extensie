@@ -6,7 +6,7 @@
     "type": "form"
   },
   {
-    "path": "/start-auditcase",
+    "path": "/sso/start-auditcase",
     "applicationId": "61b8317e-5f13-4bd7-9431-852de2383313",
     "outputUrl": "https://vanhier.securelogin.nu/api/v1/user/widget/title/start/Auditcase",
     "type": "redirect"

@@ -1,13 +1,304 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vanhier SSO</title>
-  <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
-  <script src="./sso-router.js" defer></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Vanhier SSO</title>
+
+    <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
 </head>
+
 <body>
-  <p id="status">Aanmelden...</p>
+
+    <p id="status">Aanmelden...</p>
+
+    <script>
+        const TENANT_ID =
+            "790e3646-e472-40af-b3ee-1ce89d1472c3";
+
+        const SITE_BASE =
+            "/vanhier-chrome-sso-extensie";
+
+        const MAPPING_URL =
+            `${SITE_BASE}/mapping.json?v=${Date.now()}`;
+
+        const CALLBACK_URL =
+            `${window.location.origin}${SITE_BASE}/sso/`;
+
+        const PENDING_KEY =
+            "vanhier_sso_pending";
+
+        const statusElement =
+            document.getElementById("status");
+
+
+        function setStatus(text) {
+
+            console.log("[SSO CALLBACK]", text);
+
+            if (statusElement) {
+                statusElement.textContent = text;
+            }
+
+        }
+
+
+        function normalizePath(path) {
+
+            if (!path) {
+                return "/";
+            }
+
+            path =
+                decodeURIComponent(path);
+
+            return (
+                path.replace(/\/+$/, "") || "/"
+            );
+
+        }
+
+
+        async function loadMapping() {
+
+            const response =
+                await fetch(
+                    MAPPING_URL,
+                    {
+                        cache: "no-store"
+                    }
+                );
+
+            if (!response.ok) {
+
+                throw new Error(
+                    `mapping.json kon niet worden geladen (${response.status})`
+                );
+
+            }
+
+            return await response.json();
+
+        }
+
+
+        function findConfig(mapping, path) {
+
+            const wanted =
+                normalizePath(path);
+
+            return mapping.find(item =>
+                normalizePath(item.path) === wanted
+            );
+
+        }
+
+
+        function getPending() {
+
+            try {
+
+                const value =
+                    sessionStorage.getItem(
+                        PENDING_KEY
+                    );
+
+                if (!value) {
+                    return null;
+                }
+
+                return JSON.parse(value);
+
+            }
+            catch {
+
+                sessionStorage.removeItem(
+                    PENDING_KEY
+                );
+
+                return null;
+
+            }
+
+        }
+
+
+        function clearPending() {
+
+            sessionStorage.removeItem(
+                PENDING_KEY
+            );
+
+        }
+
+
+        function buildMsal(applicationId) {
+
+            return new msal.PublicClientApplication({
+
+                auth: {
+
+                    clientId:
+                        applicationId,
+
+                    authority:
+                        `https://login.microsoftonline.com/${TENANT_ID}`,
+
+                    redirectUri:
+                        CALLBACK_URL
+
+                },
+
+                cache: {
+
+                    cacheLocation:
+                        "sessionStorage",
+
+                    storeAuthStateInCookie:
+                        false
+
+                }
+
+            });
+
+        }
+
+
+        function execute(config) {
+
+            console.log(
+                "[SSO CALLBACK] Doorsturen naar:",
+                config.outputUrl
+            );
+
+            window.location.replace(
+                config.outputUrl
+            );
+
+        }
+
+
+        async function main() {
+
+            try {
+
+                setStatus(
+                    "Toegang controleren..."
+                );
+
+                const pending =
+                    getPending();
+
+                console.log(
+                    "[SSO CALLBACK] Pending:",
+                    pending
+                );
+
+                if (!pending) {
+
+                    throw new Error(
+                        "Geen openstaande SSO-aanmelding gevonden"
+                    );
+
+                }
+
+                const mapping =
+                    await loadMapping();
+
+                const config =
+                    findConfig(
+                        mapping,
+                        pending.path
+                    );
+
+                if (!config) {
+
+                    throw new Error(
+                        `Geen configuratie gevonden voor ${pending.path}`
+                    );
+
+                }
+
+                console.log(
+                    "[SSO CALLBACK] Config:",
+                    config
+                );
+
+                const msalInstance =
+                    buildMsal(
+                        pending.applicationId
+                    );
+
+                await msalInstance.initialize();
+
+                console.log(
+                    "[SSO CALLBACK] handleRedirectPromise..."
+                );
+
+                const response =
+                    await msalInstance.handleRedirectPromise();
+
+                console.log(
+                    "[SSO CALLBACK] Response:",
+                    response
+                );
+
+                if (response?.account) {
+
+                    console.log(
+                        "[SSO CALLBACK] Login succesvol voor:",
+                        response.account.username
+                    );
+
+                }
+                else {
+
+                    const accounts =
+                        msalInstance.getAllAccounts();
+
+                    if (accounts.length === 0) {
+
+                        throw new Error(
+                            "Geen gebruiker ontvangen van Entra"
+                        );
+
+                    }
+
+                    console.log(
+                        "[SSO CALLBACK] Bestaand account:",
+                        accounts[0].username
+                    );
+
+                }
+
+                clearPending();
+
+                setStatus(
+                    "Toegang verleend. Doorsturen..."
+                );
+
+                execute(config);
+
+            }
+            catch (error) {
+
+                console.error(
+                    "[SSO CALLBACK] FOUT:",
+                    error
+                );
+
+                setStatus(
+                    `Aanmelden mislukt: ${error.message}`
+                );
+
+            }
+
+        }
+
+
+        main();
+    </script>
+
 </body>
 </html>

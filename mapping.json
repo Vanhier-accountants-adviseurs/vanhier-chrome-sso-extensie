@@ -1,17 +1,12 @@
 [
   {
-    "path": "/start-twinfield",
+    "path": "/sso/start-twinfield",
     "applicationId": "HIER-DE-CLIENT-ID-VAN-TWINFIELD",
     "outputUrl": "https://twinfield.nl",
-    "type": "form",
-    "form": {
-      "usernameSelector": "#username",
-      "passwordSelector": "#password",
-      "submitSelector": "#login"
-    }
+    "type": "form"
   },
-    {
-    "path": "/start-AuditCase",
+  {
+    "path": "/sso/start-auditcase",
     "applicationId": "61b8317e-5f13-4bd7-9431-852de2383313",
     "outputUrl": "https://vanhier.securelogin.nu/api/v1/user/widget/title/start/Auditcase",
     "type": "redirect"

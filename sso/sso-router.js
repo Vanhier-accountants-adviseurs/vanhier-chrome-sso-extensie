@@ -3,7 +3,7 @@ const TENANT_ID = "790e3646-e472-40af-b3ee-1ce89d1472c3";
 const SITE_BASE = "/vanhier-chrome-sso-extensie";
 
 const MAPPING_URL =
-    `${SITE_BASE}/mapping.json`;
+    `${SITE_BASE}/mapping.json?v=${Date.now()}`;
 
 const CALLBACK_URL =
     `${window.location.origin}${SITE_BASE}/sso/`;
@@ -15,6 +15,8 @@ const statusElement =
 
 
 function setStatus(text) {
+
+    console.log("[SSO]", text);
 
     if (statusElement) {
         statusElement.textContent = text;
@@ -29,42 +31,68 @@ function normalizePath(path) {
         return "/";
     }
 
+    path = decodeURIComponent(path);
+
+    if (path.startsWith("http")) {
+        path = new URL(path).pathname;
+    }
+
     return path.replace(/\/+$/, "") || "/";
 
 }
 
 
-function currentPath() {
+function getRoutePath() {
+
+    let path = normalizePath(
+        window.location.pathname
+    );
+
+    console.log(
+        "[SSO] Browser path:",
+        path
+    );
 
     /*
-        Browser:
-        /vanhier-chrome-sso-extensie/sso/start-auditcase
-
-        Mapping:
-        /sso/start-auditcase
-
-        Daarom verwijderen we SITE_BASE.
+        Verwijder GitHub Pages repository-pad.
     */
 
-    let path = window.location.pathname;
-
     if (path.startsWith(SITE_BASE)) {
-        path = path.substring(SITE_BASE.length);
+
+        path =
+            path.substring(
+                SITE_BASE.length
+            );
+
     }
 
-    return normalizePath(path);
+    path =
+        normalizePath(path);
+
+    console.log(
+        "[SSO] Route path:",
+        path
+    );
+
+    return path;
 
 }
 
 
 async function loadMapping() {
 
-    const response = await fetch(
-        MAPPING_URL,
-        {
-            cache: "no-store"
-        }
+    console.log(
+        "[SSO] Mapping laden:",
+        MAPPING_URL
     );
+
+    const response =
+        await fetch(
+            MAPPING_URL,
+            {
+                cache: "no-store"
+            }
+        );
 
     if (!response.ok) {
 
@@ -76,6 +104,11 @@ async function loadMapping() {
 
     const mapping =
         await response.json();
+
+    console.log(
+        "[SSO] Mapping:",
+        mapping
+    );
 
     if (!Array.isArray(mapping)) {
 
@@ -92,12 +125,41 @@ async function loadMapping() {
 
 function findConfig(mapping, path) {
 
-    const wanted =
+    const routePath =
         normalizePath(path);
 
-    return mapping.find(item =>
-        normalizePath(item.path) === wanted
+    console.log(
+        "[SSO] Zoek route:",
+        routePath
     );
+
+    const config =
+        mapping.find(item => {
+
+            const mappingPath =
+                normalizePath(item.path);
+
+            console.log(
+                "[SSO] Vergelijk:",
+                mappingPath,
+                "==",
+                routePath
+            );
+
+            return (
+                mappingPath === routePath ||
+                mappingPath ===
+                    `${SITE_BASE}${routePath}`
+            );
+
+        });
+
+    console.log(
+        "[SSO] Resultaat:",
+        config
+    );
+
+    return config;
 
 }
 
@@ -107,13 +169,17 @@ function getPending() {
     try {
 
         return JSON.parse(
-            sessionStorage.getItem(PENDING_KEY) || "null"
+            sessionStorage.getItem(
+                PENDING_KEY
+            ) || "null"
         );
 
     }
     catch {
 
-        sessionStorage.removeItem(PENDING_KEY);
+        sessionStorage.removeItem(
+            PENDING_KEY
+        );
 
         return null;
 
@@ -128,7 +194,8 @@ function setPending(config) {
         PENDING_KEY,
         JSON.stringify({
             path: config.path,
-            applicationId: config.applicationId
+            applicationId:
+                config.applicationId
         })
     );
 
@@ -137,7 +204,9 @@ function setPending(config) {
 
 function clearPending() {
 
-    sessionStorage.removeItem(PENDING_KEY);
+    sessionStorage.removeItem(
+        PENDING_KEY
+    );
 
 }
 
@@ -159,7 +228,8 @@ function buildMsal(applicationId) {
 
         auth: {
 
-            clientId: applicationId,
+            clientId:
+                applicationId,
 
             authority:
                 `https://login.microsoftonline.com/${TENANT_ID}`,
@@ -183,10 +253,17 @@ function buildMsal(applicationId) {
 
 async function authenticate(config) {
 
+    console.log(
+        "[SSO] Authenticatie voor:",
+        config
+    );
+
     setPending(config);
 
     const msalInstance =
-        buildMsal(config.applicationId);
+        buildMsal(
+            config.applicationId
+        );
 
     await msalInstance.initialize();
 
@@ -196,7 +273,14 @@ async function authenticate(config) {
             "openid",
             "profile",
             "email"
-        ]
+        ],
+
+        state:
+            btoa(
+                JSON.stringify({
+                    path: config.path
+                })
+            )
 
     });
 
@@ -205,8 +289,17 @@ async function authenticate(config) {
 
 async function handleCallback(mapping) {
 
+    console.log(
+        "[SSO] Entra callback"
+    );
+
     const pending =
         getPending();
+
+    console.log(
+        "[SSO] Pending:",
+        pending
+    );
 
     if (!pending) {
 
@@ -240,6 +333,11 @@ async function handleCallback(mapping) {
     const response =
         await msalInstance.handleRedirectPromise();
 
+    console.log(
+        "[SSO] Entra response:",
+        response
+    );
+
     if (!response) {
 
         throw new Error(
@@ -269,6 +367,11 @@ async function handleCallback(mapping) {
 
 function execute(config) {
 
+    console.log(
+        "[SSO] Uitvoeren:",
+        config
+    );
+
     switch (config.type) {
 
         case "redirect":
@@ -281,14 +384,6 @@ function execute(config) {
 
 
         case "form":
-
-            /*
-                Voor nu alleen redirect.
-
-                Later kunnen we hier bijvoorbeeld
-                Twinfield-specifieke logica
-                aan koppelen.
-            */
 
             window.location.replace(
                 config.outputUrl
@@ -311,7 +406,7 @@ function execute(config) {
 async function startRoute(mapping) {
 
     const path =
-        currentPath();
+        getRoutePath();
 
     const config =
         findConfig(
@@ -329,11 +424,9 @@ async function startRoute(mapping) {
 
     }
 
-    setStatus(
-        "Aanmelden..."
+    await authenticate(
+        config
     );
-
-    await authenticate(config);
 
 }
 
@@ -346,28 +439,32 @@ async function main() {
             await loadMapping();
 
         const path =
-            currentPath();
+            getRoutePath();
 
         /*
-            /sso is onze centrale
-            Entra callback.
+            Centrale callback:
+            /sso/
         */
 
         if (path === "/sso") {
 
-            await handleCallback(mapping);
+            await handleCallback(
+                mapping
+            );
 
             return;
 
         }
 
-        await startRoute(mapping);
+        await startRoute(
+            mapping
+        );
 
     }
     catch (error) {
 
         console.error(
-            "SSO router fout:",
+            "[SSO] FOUT:",
             error
         );
 

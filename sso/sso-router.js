@@ -1,185 +1,383 @@
 const TENANT_ID = "790e3646-e472-40af-b3ee-1ce89d1472c3";
-const SITE_BASE = "/vanhier-chrome-sso-extensie";
-const MAPPING_URL = `${SITE_BASE}/mapping.json`;
-const CALLBACK_URL = `${window.location.origin}${SITE_BASE}/sso/`;
 
-const statusElement = document.getElementById("status");
+const SITE_BASE = "/vanhier-chrome-sso-extensie";
+
+const MAPPING_URL =
+    `${SITE_BASE}/mapping.json`;
+
+const CALLBACK_URL =
+    `${window.location.origin}${SITE_BASE}/sso/`;
+
+const PENDING_KEY = "vanhier_sso_pending";
+
+const statusElement =
+    document.getElementById("status");
+
 
 function setStatus(text) {
+
     if (statusElement) {
         statusElement.textContent = text;
     }
+
 }
+
 
 function normalizePath(path) {
-    if (!path) return "/";
-    const withoutTrailingSlash = path.replace(/\/+$/, "");
-    return withoutTrailingSlash || "/";
-}
 
-function currentPath() {
-    return normalizePath(window.location.pathname);
-}
-
-async function loadMapping() {
-    const response = await fetch(MAPPING_URL, { cache: "no-store" });
-
-    if (!response.ok) {
-        throw new Error(`mapping.json kon niet worden geladen (${response.status})`);
+    if (!path) {
+        return "/";
     }
 
-    const mapping = await response.json();
+    return path.replace(/\/+$/, "") || "/";
+
+}
+
+
+function currentPath() {
+
+    /*
+        Browser:
+        /vanhier-chrome-sso-extensie/sso/start-auditcase
+
+        Mapping:
+        /sso/start-auditcase
+
+        Daarom verwijderen we SITE_BASE.
+    */
+
+    let path = window.location.pathname;
+
+    if (path.startsWith(SITE_BASE)) {
+        path = path.substring(SITE_BASE.length);
+    }
+
+    return normalizePath(path);
+
+}
+
+
+async function loadMapping() {
+
+    const response = await fetch(
+        MAPPING_URL,
+        {
+            cache: "no-store"
+        }
+    );
+
+    if (!response.ok) {
+
+        throw new Error(
+            `mapping.json kon niet worden geladen (${response.status})`
+        );
+
+    }
+
+    const mapping =
+        await response.json();
 
     if (!Array.isArray(mapping)) {
-        throw new Error("mapping.json moet een array bevatten");
+
+        throw new Error(
+            "mapping.json moet een array zijn"
+        );
+
     }
 
     return mapping;
+
 }
+
 
 function findConfig(mapping, path) {
-    const normalized = normalizePath(path);
 
-    return mapping.find(item => {
-        return normalizePath(item.path) === normalized;
-    });
+    const wanted =
+        normalizePath(path);
+
+    return mapping.find(item =>
+        normalizePath(item.path) === wanted
+    );
+
 }
 
-function decodeState(state) {
-    if (!state) return null;
+
+function getPending() {
 
     try {
-        return JSON.parse(atob(state));
-    } catch {
-        return null;
+
+        return JSON.parse(
+            sessionStorage.getItem(PENDING_KEY) || "null"
+        );
+
     }
+    catch {
+
+        sessionStorage.removeItem(PENDING_KEY);
+
+        return null;
+
+    }
+
 }
 
-function buildMsal(config) {
-    if (!config.applicationId || config.applicationId.startsWith("HIER-DE-")) {
-        throw new Error(`Geen geldige applicationId ingesteld voor ${config.path}`);
+
+function setPending(config) {
+
+    sessionStorage.setItem(
+        PENDING_KEY,
+        JSON.stringify({
+            path: config.path,
+            applicationId: config.applicationId
+        })
+    );
+
+}
+
+
+function clearPending() {
+
+    sessionStorage.removeItem(PENDING_KEY);
+
+}
+
+
+function buildMsal(applicationId) {
+
+    if (
+        !applicationId ||
+        applicationId.startsWith("HIER-DE-")
+    ) {
+
+        throw new Error(
+            "Geen geldige applicationId ingesteld"
+        );
+
     }
 
     return new msal.PublicClientApplication({
+
         auth: {
-            clientId: config.applicationId,
-            authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-            redirectUri: CALLBACK_URL
+
+            clientId: applicationId,
+
+            authority:
+                `https://login.microsoftonline.com/${TENANT_ID}`,
+
+            redirectUri:
+                CALLBACK_URL
+
         },
+
         cache: {
-            cacheLocation: "sessionStorage"
+
+            cacheLocation:
+                "sessionStorage"
+
         }
+
     });
+
 }
 
+
 async function authenticate(config) {
-    const msalInstance = buildMsal(config);
+
+    setPending(config);
+
+    const msalInstance =
+        buildMsal(config.applicationId);
 
     await msalInstance.initialize();
 
-    const response = await msalInstance.handleRedirectPromise();
-
-    if (response) {
-        return {
-            account: response.account,
-            state: decodeState(response.state)
-        };
-    }
-
-    const accounts = msalInstance.getAllAccounts();
-
-    if (accounts.length > 0) {
-        return {
-            account: accounts[0],
-            state: null
-        };
-    }
-
     await msalInstance.loginRedirect({
-        scopes: ["openid", "profile", "email"],
-        state: btoa(JSON.stringify({
-            path: config.path
-        }))
+
+        scopes: [
+            "openid",
+            "profile",
+            "email"
+        ]
+
     });
 
-    return null;
 }
+
+
+async function handleCallback(mapping) {
+
+    const pending =
+        getPending();
+
+    if (!pending) {
+
+        throw new Error(
+            "Geen openstaande SSO-aanmelding gevonden"
+        );
+
+    }
+
+    const config =
+        findConfig(
+            mapping,
+            pending.path
+        );
+
+    if (!config) {
+
+        throw new Error(
+            `Geen configuratie gevonden voor ${pending.path}`
+        );
+
+    }
+
+    const msalInstance =
+        buildMsal(
+            pending.applicationId
+        );
+
+    await msalInstance.initialize();
+
+    const response =
+        await msalInstance.handleRedirectPromise();
+
+    if (!response) {
+
+        throw new Error(
+            "Geen Entra callback ontvangen"
+        );
+
+    }
+
+    if (!response.account) {
+
+        throw new Error(
+            "Geen gebruikersaccount ontvangen van Entra"
+        );
+
+    }
+
+    clearPending();
+
+    setStatus(
+        "Toegang gecontroleerd. Doorsturen..."
+    );
+
+    execute(config);
+
+}
+
 
 function execute(config) {
-    if (config.type === "redirect") {
-        window.location.replace(config.outputUrl);
-        return;
+
+    switch (config.type) {
+
+        case "redirect":
+
+            window.location.replace(
+                config.outputUrl
+            );
+
+            break;
+
+
+        case "form":
+
+            /*
+                Voor nu alleen redirect.
+
+                Later kunnen we hier bijvoorbeeld
+                Twinfield-specifieke logica
+                aan koppelen.
+            */
+
+            window.location.replace(
+                config.outputUrl
+            );
+
+            break;
+
+
+        default:
+
+            throw new Error(
+                `Onbekend type: ${config.type}`
+            );
+
     }
 
-    if (config.type === "form") {
-        // De formulierhandeling gebeurt later via de Chrome-extensie.
-        window.location.replace(config.outputUrl);
-        return;
-    }
-
-    throw new Error(`Onbekend type: ${config.type}`);
 }
+
+
+async function startRoute(mapping) {
+
+    const path =
+        currentPath();
+
+    const config =
+        findConfig(
+            mapping,
+            path
+        );
+
+    if (!config) {
+
+        setStatus(
+            `Deze SSO-route bestaat niet: ${path}`
+        );
+
+        return;
+
+    }
+
+    setStatus(
+        "Aanmelden..."
+    );
+
+    await authenticate(config);
+
+}
+
 
 async function main() {
+
     try {
-        const mapping = await loadMapping();
 
-        const initialPath = currentPath();
+        const mapping =
+            await loadMapping();
 
-        // Een Entra callback komt terug op /sso/.
-        // Het oorspronkelijke pad staat in state.
-        let path = initialPath;
+        const path =
+            currentPath();
 
-        setStatus("Aanmelden...");
+        /*
+            /sso is onze centrale
+            Entra callback.
+        */
 
-        // Gebruik eerst een tijdelijke MSAL-instantie om de redirect te verwerken.
-        // De clientId staat in de mapping van het oorspronkelijke pad.
-        if (initialPath === normalizePath(`${SITE_BASE}/sso`)) {
-            // Op de callbackpagina kunnen we nog niet weten welke app gebruikt werd.
-            // Probeer het oorspronkelijke pad uit de URL/state niet te raden;
-            // daarom gebruiken we de pending route uit sessionStorage.
-            const pendingPath = sessionStorage.getItem("vanhier_sso_pending_path");
+        if (path === "/sso") {
 
-            if (pendingPath) {
-                path = normalizePath(pendingPath);
-            }
-        }
+            await handleCallback(mapping);
 
-        let config = findConfig(mapping, path);
-
-        if (!config) {
-            setStatus("Deze SSO-route bestaat niet.");
             return;
+
         }
 
-        // Onthoud de route voordat we naar Entra gaan.
-        sessionStorage.setItem("vanhier_sso_pending_path", config.path);
+        await startRoute(mapping);
 
-        const authResult = await authenticate(config);
-
-        if (!authResult) {
-            return;
-        }
-
-        // Bij een callback mag state de route definitief bepalen.
-        const statePath = authResult.state?.path;
-        if (statePath) {
-            config = findConfig(mapping, normalizePath(statePath));
-
-            if (!config) {
-                throw new Error("De SSO-route uit de Entra state bestaat niet meer.");
-            }
-        }
-
-        sessionStorage.removeItem("vanhier_sso_pending_path");
-
-        setStatus("Toegang gecontroleerd. Doorsturen...");
-        execute(config);
-
-    } catch (error) {
-        console.error("SSO router fout:", error);
-        setStatus(`Aanmelden mislukt: ${error.message}`);
     }
+    catch (error) {
+
+        console.error(
+            "SSO router fout:",
+            error
+        );
+
+        setStatus(
+            `Aanmelden mislukt: ${error.message}`
+        );
+
+    }
+
 }
+
 
 main();

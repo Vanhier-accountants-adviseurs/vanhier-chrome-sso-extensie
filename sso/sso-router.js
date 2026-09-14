@@ -7,6 +7,12 @@ const SITE_BASE =
 const MAPPING_URL =
     `${SITE_BASE}/mapping.json?v=${Date.now()}`;
 
+const CALLBACK_URL =
+    `${window.location.origin}${SITE_BASE}/sso/`;
+
+const PENDING_KEY =
+    "vanhier_sso_pending";
+
 const statusElement =
     document.getElementById("status");
 
@@ -28,12 +34,9 @@ function normalizePath(path) {
         return "/";
     }
 
-    path =
-        decodeURIComponent(path);
+    path = decodeURIComponent(path);
 
-    return (
-        path.replace(/\/+$/, "") || "/"
-    );
+    return path.replace(/\/+$/, "") || "/";
 
 }
 
@@ -46,7 +49,7 @@ function getRoutePath() {
         );
 
     console.log(
-        "[SSO] Volledige browser path:",
+        "[SSO] Browser path:",
         path
     );
 
@@ -122,7 +125,7 @@ function findConfig(mapping, path) {
         normalizePath(path);
 
     console.log(
-        "[SSO] Zoek configuratie voor:",
+        "[SSO] Zoek route:",
         wanted
     );
 
@@ -130,14 +133,12 @@ function findConfig(mapping, path) {
         mapping.find(item => {
 
             const itemPath =
-                normalizePath(
-                    item.path
-                );
+                normalizePath(item.path);
 
             console.log(
                 "[SSO] Vergelijk:",
                 itemPath,
-                "met",
+                "==",
                 wanted
             );
 
@@ -146,7 +147,7 @@ function findConfig(mapping, path) {
         });
 
     console.log(
-        "[SSO] Configuratie:",
+        "[SSO] Resultaat:",
         config
     );
 
@@ -155,31 +156,95 @@ function findConfig(mapping, path) {
 }
 
 
-function buildMsal(config) {
+function getPending() {
+
+    try {
+
+        const value =
+            sessionStorage.getItem(
+                PENDING_KEY
+            );
+
+        if (!value) {
+            return null;
+        }
+
+        return JSON.parse(value);
+
+    }
+    catch (error) {
+
+        console.error(
+            "[SSO] Ongeldige pending data:",
+            error
+        );
+
+        sessionStorage.removeItem(
+            PENDING_KEY
+        );
+
+        return null;
+
+    }
+
+}
+
+
+function setPending(config) {
+
+    const pending = {
+
+        path:
+            config.path,
+
+        applicationId:
+            config.applicationId
+
+    };
+
+    sessionStorage.setItem(
+        PENDING_KEY,
+        JSON.stringify(pending)
+    );
+
+    console.log(
+        "[SSO] Pending opgeslagen:",
+        pending
+    );
+
+}
+
+
+function clearPending() {
+
+    sessionStorage.removeItem(
+        PENDING_KEY
+    );
+
+}
+
+
+function buildMsal(applicationId) {
 
     if (
-        !config.applicationId ||
-        config.applicationId.startsWith("HIER-DE-")
+        !applicationId ||
+        applicationId.startsWith("HIER-DE-")
     ) {
 
         throw new Error(
-            `Geen geldige applicationId voor ${config.path}`
+            "Geen geldige applicationId ingesteld"
         );
 
     }
 
-    /*
-        BELANGRIJK:
-        iedere toepassing gebruikt zichzelf
-        als redirect URI.
-    */
-
-    const redirectUri =
-        `${window.location.origin}${SITE_BASE}${config.path}`;
+    console.log(
+        "[SSO] MSAL Application ID:",
+        applicationId
+    );
 
     console.log(
         "[SSO] Redirect URI:",
-        redirectUri
+        CALLBACK_URL
     );
 
     return new msal.PublicClientApplication({
@@ -187,20 +252,23 @@ function buildMsal(config) {
         auth: {
 
             clientId:
-                config.applicationId,
+                applicationId,
 
             authority:
                 `https://login.microsoftonline.com/${TENANT_ID}`,
 
             redirectUri:
-                redirectUri
+                CALLBACK_URL
 
         },
 
         cache: {
 
             cacheLocation:
-                "sessionStorage"
+                "sessionStorage",
+
+            storeAuthStateInCookie:
+                false
 
         }
 
@@ -209,27 +277,21 @@ function buildMsal(config) {
 }
 
 
-async function authenticate(config) {
+async function startLogin(config) {
+
+    setPending(config);
 
     const msalInstance =
-        buildMsal(config);
+        buildMsal(
+            config.applicationId
+        );
 
     await msalInstance.initialize();
 
     /*
-        HEEL BELANGRIJK:
-
-        Ook op de eerste pagina-load roepen we
-        handleRedirectPromise() aan.
-
-        Als er nog een lopende redirect-interactie
-        is, wordt die hier afgehandeld voordat
-        loginRedirect() opnieuw wordt aangeroepen.
+        Eerst controleren of MSAL al een callback
+        moet verwerken.
     */
-
-    console.log(
-        "[SSO] Controleren op bestaande Entra callback..."
-    );
 
     const response =
         await msalInstance.handleRedirectPromise();
@@ -237,12 +299,8 @@ async function authenticate(config) {
     if (response) {
 
         console.log(
-            "[SSO] Entra login succesvol:",
-            response.account
-        );
-
-        setStatus(
-            "Toegang gecontroleerd. Doorsturen..."
+            "[SSO] Bestaande callback verwerkt:",
+            response
         );
 
         execute(config);
@@ -252,31 +310,7 @@ async function authenticate(config) {
     }
 
     /*
-        Bestaande login?
-    */
-
-    const accounts =
-        msalInstance.getAllAccounts();
-
-    console.log(
-        "[SSO] Bestaande accounts:",
-        accounts
-    );
-
-    if (accounts.length > 0) {
-
-        setStatus(
-            "Toegang gecontroleerd. Doorsturen..."
-        );
-
-        execute(config);
-
-        return;
-
-    }
-
-    /*
-        Nog niet ingelogd.
+        Geen callback, dus normale login starten.
     */
 
     setStatus(
@@ -284,7 +318,7 @@ async function authenticate(config) {
     );
 
     console.log(
-        "[SSO] Start loginRedirect()"
+        "[SSO] loginRedirect starten"
     );
 
     await msalInstance.loginRedirect({
@@ -300,10 +334,104 @@ async function authenticate(config) {
 }
 
 
+async function handleCallback(mapping) {
+
+    console.log(
+        "[SSO] Callbackpagina geopend"
+    );
+
+    const pending =
+        getPending();
+
+    console.log(
+        "[SSO] Pending:",
+        pending
+    );
+
+    if (!pending) {
+
+        throw new Error(
+            "Geen openstaande SSO-aanmelding gevonden"
+        );
+
+    }
+
+    const config =
+        findConfig(
+            mapping,
+            pending.path
+        );
+
+    if (!config) {
+
+        throw new Error(
+            `Geen configuratie gevonden voor ${pending.path}`
+        );
+
+    }
+
+    const msalInstance =
+        buildMsal(
+            pending.applicationId
+        );
+
+    await msalInstance.initialize();
+
+    console.log(
+        "[SSO] handleRedirectPromise uitvoeren"
+    );
+
+    const response =
+        await msalInstance.handleRedirectPromise();
+
+    console.log(
+        "[SSO] Entra response:",
+        response
+    );
+
+    if (!response) {
+
+        /*
+            Dit kan voorkomen als de callbackpagina
+            opnieuw geladen wordt nadat de callback
+            al verwerkt is.
+
+            Controleer daarom ook bestaande accounts.
+        */
+
+        const accounts =
+            msalInstance.getAllAccounts();
+
+        if (accounts.length === 0) {
+
+            throw new Error(
+                "Geen Entra callback en geen ingelogde gebruiker gevonden"
+            );
+
+        }
+
+        console.log(
+            "[SSO] Bestaand account gevonden:",
+            accounts[0]
+        );
+
+    }
+
+    clearPending();
+
+    setStatus(
+        "Toegang gecontroleerd. Doorsturen..."
+    );
+
+    execute(config);
+
+}
+
+
 function execute(config) {
 
     console.log(
-        "[SSO] Actie uitvoeren:",
+        "[SSO] Uitvoeren:",
         config
     );
 
@@ -311,13 +439,25 @@ function execute(config) {
 
         case "redirect":
 
+            window.location.replace(
+                config.outputUrl
+            );
+
+            return;
+
         case "form":
+
+            /*
+                Voorlopig hetzelfde als redirect.
+                Later kan hier de specifieke Twinfield-flow
+                worden toegevoegd.
+            */
 
             window.location.replace(
                 config.outputUrl
             );
 
-            break;
+            return;
 
         default:
 
@@ -326,6 +466,34 @@ function execute(config) {
             );
 
     }
+
+}
+
+
+async function startRoute(mapping) {
+
+    const path =
+        getRoutePath();
+
+    const config =
+        findConfig(
+            mapping,
+            path
+        );
+
+    if (!config) {
+
+        setStatus(
+            `Deze SSO-route bestaat niet: ${path}`
+        );
+
+        return;
+
+    }
+
+    await startLogin(
+        config
+    );
 
 }
 
@@ -340,28 +508,22 @@ async function main() {
         const path =
             getRoutePath();
 
-        const config =
-            findConfig(
-                mapping,
-                path
-            );
+        /*
+            /sso/ is de centrale Entra callback.
+        */
 
-        if (!config) {
+        if (path === "/sso") {
 
-            setStatus(
-                `Deze SSO-route bestaat niet: ${path}`
+            await handleCallback(
+                mapping
             );
 
             return;
 
         }
 
-        setStatus(
-            "Aanmelden..."
-        );
-
-        await authenticate(
-            config
+        await startRoute(
+            mapping
         );
 
     }

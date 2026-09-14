@@ -1,14 +1,11 @@
-const TENANT_ID = "790e3646-e472-40af-b3ee-1ce89d1472c3";
+const TENANT_ID =
+    "790e3646-e472-40af-b3ee-1ce89d1472c3";
 
-const SITE_BASE = "/vanhier-chrome-sso-extensie";
+const SITE_BASE =
+    "/vanhier-chrome-sso-extensie";
 
 const MAPPING_URL =
     `${SITE_BASE}/mapping.json?v=${Date.now()}`;
-
-const CALLBACK_URL =
-    `${window.location.origin}${SITE_BASE}/sso/`;
-
-const PENDING_KEY = "vanhier_sso_pending";
 
 const statusElement =
     document.getElementById("status");
@@ -31,31 +28,27 @@ function normalizePath(path) {
         return "/";
     }
 
-    path = decodeURIComponent(path);
+    path =
+        decodeURIComponent(path);
 
-    if (path.startsWith("http")) {
-        path = new URL(path).pathname;
-    }
-
-    return path.replace(/\/+$/, "") || "/";
+    return (
+        path.replace(/\/+$/, "") || "/"
+    );
 
 }
 
 
 function getRoutePath() {
 
-    let path = normalizePath(
-        window.location.pathname
-    );
+    let path =
+        normalizePath(
+            window.location.pathname
+        );
 
     console.log(
-        "[SSO] Browser path:",
+        "[SSO] Volledige browser path:",
         path
     );
-
-    /*
-        Verwijder GitHub Pages repository-pad.
-    */
 
     if (path.startsWith(SITE_BASE)) {
 
@@ -125,37 +118,35 @@ async function loadMapping() {
 
 function findConfig(mapping, path) {
 
-    const routePath =
+    const wanted =
         normalizePath(path);
 
     console.log(
-        "[SSO] Zoek route:",
-        routePath
+        "[SSO] Zoek configuratie voor:",
+        wanted
     );
 
     const config =
         mapping.find(item => {
 
-            const mappingPath =
-                normalizePath(item.path);
+            const itemPath =
+                normalizePath(
+                    item.path
+                );
 
             console.log(
                 "[SSO] Vergelijk:",
-                mappingPath,
-                "==",
-                routePath
+                itemPath,
+                "met",
+                wanted
             );
 
-            return (
-                mappingPath === routePath ||
-                mappingPath ===
-                    `${SITE_BASE}${routePath}`
-            );
+            return itemPath === wanted;
 
         });
 
     console.log(
-        "[SSO] Resultaat:",
+        "[SSO] Configuratie:",
         config
     );
 
@@ -164,78 +155,45 @@ function findConfig(mapping, path) {
 }
 
 
-function getPending() {
-
-    try {
-
-        return JSON.parse(
-            sessionStorage.getItem(
-                PENDING_KEY
-            ) || "null"
-        );
-
-    }
-    catch {
-
-        sessionStorage.removeItem(
-            PENDING_KEY
-        );
-
-        return null;
-
-    }
-
-}
-
-
-function setPending(config) {
-
-    sessionStorage.setItem(
-        PENDING_KEY,
-        JSON.stringify({
-            path: config.path,
-            applicationId:
-                config.applicationId
-        })
-    );
-
-}
-
-
-function clearPending() {
-
-    sessionStorage.removeItem(
-        PENDING_KEY
-    );
-
-}
-
-
-function buildMsal(applicationId) {
+function buildMsal(config) {
 
     if (
-        !applicationId ||
-        applicationId.startsWith("HIER-DE-")
+        !config.applicationId ||
+        config.applicationId.startsWith("HIER-DE-")
     ) {
 
         throw new Error(
-            "Geen geldige applicationId ingesteld"
+            `Geen geldige applicationId voor ${config.path}`
         );
 
     }
+
+    /*
+        BELANGRIJK:
+        iedere toepassing gebruikt zichzelf
+        als redirect URI.
+    */
+
+    const redirectUri =
+        `${window.location.origin}${SITE_BASE}${config.path}`;
+
+    console.log(
+        "[SSO] Redirect URI:",
+        redirectUri
+    );
 
     return new msal.PublicClientApplication({
 
         auth: {
 
             clientId:
-                applicationId,
+                config.applicationId,
 
             authority:
                 `https://login.microsoftonline.com/${TENANT_ID}`,
 
             redirectUri:
-                CALLBACK_URL
+                redirectUri
 
         },
 
@@ -253,19 +211,81 @@ function buildMsal(applicationId) {
 
 async function authenticate(config) {
 
-    console.log(
-        "[SSO] Authenticatie voor:",
-        config
-    );
-
-    setPending(config);
-
     const msalInstance =
-        buildMsal(
-            config.applicationId
-        );
+        buildMsal(config);
 
     await msalInstance.initialize();
+
+    /*
+        HEEL BELANGRIJK:
+
+        Ook op de eerste pagina-load roepen we
+        handleRedirectPromise() aan.
+
+        Als er nog een lopende redirect-interactie
+        is, wordt die hier afgehandeld voordat
+        loginRedirect() opnieuw wordt aangeroepen.
+    */
+
+    console.log(
+        "[SSO] Controleren op bestaande Entra callback..."
+    );
+
+    const response =
+        await msalInstance.handleRedirectPromise();
+
+    if (response) {
+
+        console.log(
+            "[SSO] Entra login succesvol:",
+            response.account
+        );
+
+        setStatus(
+            "Toegang gecontroleerd. Doorsturen..."
+        );
+
+        execute(config);
+
+        return;
+
+    }
+
+    /*
+        Bestaande login?
+    */
+
+    const accounts =
+        msalInstance.getAllAccounts();
+
+    console.log(
+        "[SSO] Bestaande accounts:",
+        accounts
+    );
+
+    if (accounts.length > 0) {
+
+        setStatus(
+            "Toegang gecontroleerd. Doorsturen..."
+        );
+
+        execute(config);
+
+        return;
+
+    }
+
+    /*
+        Nog niet ingelogd.
+    */
+
+    setStatus(
+        "Doorsturen naar Microsoft..."
+    );
+
+    console.log(
+        "[SSO] Start loginRedirect()"
+    );
 
     await msalInstance.loginRedirect({
 
@@ -273,94 +293,9 @@ async function authenticate(config) {
             "openid",
             "profile",
             "email"
-        ],
-
-        state:
-            btoa(
-                JSON.stringify({
-                    path: config.path
-                })
-            )
+        ]
 
     });
-
-}
-
-
-async function handleCallback(mapping) {
-
-    console.log(
-        "[SSO] Entra callback"
-    );
-
-    const pending =
-        getPending();
-
-    console.log(
-        "[SSO] Pending:",
-        pending
-    );
-
-    if (!pending) {
-
-        throw new Error(
-            "Geen openstaande SSO-aanmelding gevonden"
-        );
-
-    }
-
-    const config =
-        findConfig(
-            mapping,
-            pending.path
-        );
-
-    if (!config) {
-
-        throw new Error(
-            `Geen configuratie gevonden voor ${pending.path}`
-        );
-
-    }
-
-    const msalInstance =
-        buildMsal(
-            pending.applicationId
-        );
-
-    await msalInstance.initialize();
-
-    const response =
-        await msalInstance.handleRedirectPromise();
-
-    console.log(
-        "[SSO] Entra response:",
-        response
-    );
-
-    if (!response) {
-
-        throw new Error(
-            "Geen Entra callback ontvangen"
-        );
-
-    }
-
-    if (!response.account) {
-
-        throw new Error(
-            "Geen gebruikersaccount ontvangen van Entra"
-        );
-
-    }
-
-    clearPending();
-
-    setStatus(
-        "Toegang gecontroleerd. Doorsturen..."
-    );
-
-    execute(config);
 
 }
 
@@ -368,20 +303,13 @@ async function handleCallback(mapping) {
 function execute(config) {
 
     console.log(
-        "[SSO] Uitvoeren:",
+        "[SSO] Actie uitvoeren:",
         config
     );
 
     switch (config.type) {
 
         case "redirect":
-
-            window.location.replace(
-                config.outputUrl
-            );
-
-            break;
-
 
         case "form":
 
@@ -391,7 +319,6 @@ function execute(config) {
 
             break;
 
-
         default:
 
             throw new Error(
@@ -399,34 +326,6 @@ function execute(config) {
             );
 
     }
-
-}
-
-
-async function startRoute(mapping) {
-
-    const path =
-        getRoutePath();
-
-    const config =
-        findConfig(
-            mapping,
-            path
-        );
-
-    if (!config) {
-
-        setStatus(
-            `Deze SSO-route bestaat niet: ${path}`
-        );
-
-        return;
-
-    }
-
-    await authenticate(
-        config
-    );
 
 }
 
@@ -441,23 +340,28 @@ async function main() {
         const path =
             getRoutePath();
 
-        /*
-            Centrale callback:
-            /sso/
-        */
+        const config =
+            findConfig(
+                mapping,
+                path
+            );
 
-        if (path === "/sso") {
+        if (!config) {
 
-            await handleCallback(
-                mapping
+            setStatus(
+                `Deze SSO-route bestaat niet: ${path}`
             );
 
             return;
 
         }
 
-        await startRoute(
-            mapping
+        setStatus(
+            "Aanmelden..."
+        );
+
+        await authenticate(
+            config
         );
 
     }

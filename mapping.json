@@ -1,0 +1,13 @@
+[
+  {
+    "path": "/start-twinfield",
+    "applicationId": "HIER-DE-CLIENT-ID-VAN-TWINFIELD",
+    "outputUrl": "https://twinfield.nl",
+    "type": "form",
+    "form": {
+      "usernameSelector": "#username",
+      "passwordSelector": "#password",
+      "submitSelector": "#login"
+    }
+  }
+]

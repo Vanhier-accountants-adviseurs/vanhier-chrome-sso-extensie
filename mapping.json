@@ -10,5 +10,11 @@
     "applicationId": "4d70e083-efdd-4c3a-9545-a2acab8e9f82",
     "outputUrl": "https://vanhier.securelogin.nu/api/v1/user/widget/title/start/Auditcase",
     "type": "redirect"
+  },
+  {
+    "path": "/sso/start-nmbrsaccounting",
+    "applicationId": "e4195073-885e-4dd3-8239-15e0b783349d",
+    "outputUrl": "https://accounting.nmbrs.nl/docs/login.aspx?idp_hint=visma-connect",
+    "type": "redirect"
   }
 ]

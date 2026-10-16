@@ -14,7 +14,7 @@
   {
     "path": "/sso/start-nmbrsaccounting",
     "applicationId": "e4195073-885e-4dd3-8239-15e0b783349d",
-    "outputUrl": "https://accounting.nmbrs.nl/docs/login.aspx?idp_hint=visma-connect",
+    "outputUrl": "https://accounting.nmbrs.com/docs/login.aspx?idp_hint=visma-connect",
     "type": "redirect"
   }
 ]

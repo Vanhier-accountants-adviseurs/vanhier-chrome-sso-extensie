@@ -4,15 +4,26 @@
 
 // Visma Connect - Nmbrs Accounting
 if (location.hostname === "connect.visma.com") {
-    if (location.href.includes("accounting.nmbrs.nl")) {
+    if (
+        location.href.includes("accounting.nmbrs.nl") ||
+        location.href.includes("accounting.nmbrs.com") ||
+        location.href.includes("nmbrsaccounting")
+    ) {
         console.log("Visma: Nmbrs-login gedetecteerd");
 
         function startMicrosoftLogin() {
             const form = document.getElementById("form-provider-microsoft");
+            const button = document.getElementById("microsoft-external-auth-button");
 
             if (form) {
                 console.log("Visma: Microsoft-formulier gevonden");
                 form.requestSubmit();
+                return true;
+            }
+
+            if (button) {
+                console.log("Visma: Microsoft-knop gevonden");
+                button.click();
                 return true;
             }
 
